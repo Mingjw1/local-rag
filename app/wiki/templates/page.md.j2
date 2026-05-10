@@ -1,0 +1,29 @@
+---
+title: "{{ title }}"
+type: {{ page_type }}
+created: {{ created_date }}
+updated: {{ updated_date }}
+sources: [{{ sources | join(", ") }}]
+---
+
+# {{ title }}
+
+## 概述
+
+{{ summary }}
+
+## 核心内容
+
+{{ content }}
+
+## 关联页面
+
+{% for link in related_pages %}
+- [{{ link.title }}]({{ link.path }})
+{% endfor %}
+
+## 来源
+
+{% for source in sources %}
+- [{{ source }}](../sources/{{ source }}.md)
+{% endfor %}

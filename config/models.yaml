@@ -1,0 +1,49 @@
+# 模型注册表 — 所有模型通过 Ollama 本地部署
+models:
+  embedding:
+    default: nomic-embed-text
+    options:
+      nomic-embed-text:
+        provider: ollama
+        model: nomic-embed-text
+        dim: 768
+        max_tokens: 8192
+        batch_size: 32
+      mxbai-embed-large:
+        provider: ollama
+        model: mxbai-embed-large
+        dim: 1024
+        max_tokens: 512
+        batch_size: 16
+
+  generation:
+    default: qwen2.5:7b
+    options:
+      qwen2.5:7b:
+        provider: ollama
+        model: qwen2.5:7b
+        context_window: 32768
+        temperature: 0.3
+        top_p: 0.9
+        max_tokens: 2048
+      qwen2.5:14b:
+        provider: ollama
+        model: qwen2.5:14b
+        context_window: 32768
+        temperature: 0.3
+        top_p: 0.9
+        max_tokens: 2048
+      llama3.1:8b:
+        provider: ollama
+        model: llama3.1:8b
+        context_window: 131072
+        temperature: 0.3
+        top_p: 0.9
+        max_tokens: 2048
+      deepseek-r1:7b:
+        provider: ollama
+        model: deepseek-r1:7b
+        context_window: 131072
+        temperature: 0.3
+        top_p: 0.9
+        max_tokens: 2048

@@ -1,0 +1,16 @@
+# NVIDIA GPU 覆盖配置 — 使用方式：
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+# 前置条件：宿主机已安装 nvidia-container-toolkit
+#   sudo apt install nvidia-container-toolkit
+#   sudo systemctl restart docker
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

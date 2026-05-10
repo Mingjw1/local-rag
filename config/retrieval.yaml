@@ -1,0 +1,36 @@
+# 检索策略配置
+chunking:
+  default_strategy: recursive
+  strategies:
+    recursive:
+      chunk_size: 512
+      chunk_overlap: 64
+      separators: ["\n\n", "\n", "。", ".", " ", ""]
+    semantic:
+      min_chunk_size: 128
+      max_chunk_size: 1024
+      split_at: sentence_boundary
+    code_aware:
+      chunk_size: 1024
+      preserve_code_blocks: true
+      max_code_block_lines: 200
+
+embedding:
+  batch_size: 32
+  cache:
+    enabled: true
+    ttl: 86400
+
+search:
+  top_k: 20
+  score_threshold: 0.0
+  rerank_top_k: 5
+  hybrid_search:
+    enabled: true
+    dense_weight: 0.7
+    sparse_weight: 0.3
+
+generation:
+  stream: true
+  citation_format: "【来源:{index}】"
+  max_context_tokens: 8000

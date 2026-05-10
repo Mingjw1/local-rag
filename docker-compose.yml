@@ -1,0 +1,161 @@
+services:
+  # === 向量数据库 ===
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === 元数据数据库 ===
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ragkb}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ragkb_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-ragkb}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragkb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === 缓存 ===
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === 文档存储（对象存储）===
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minio_secret}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === 创建 MinIO Bucket（初始化容器）===
+  minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set ragkb http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minio_secret}) do echo 'waiting for minio...' && sleep 2; done;
+      /usr/bin/mc mb ragkb/${MINIO_BUCKET:-ragkb-docs} --ignore-existing;
+      /usr/bin/mc anonymous set public ragkb/${MINIO_BUCKET:-ragkb-docs};
+      echo 'minio initialized';
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # === 本地 LLM（Ollama）===
+  ollama:
+    image: ollama/ollama:rocm
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./scripts/pull-models.sh:/pull-models.sh
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "ollama serve & sleep 3 && /pull-models.sh && wait"
+    group_add:
+      - "992"  # render group GID，用于 AMD GPU 访问
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0  # RX 6700 XT (gfx1031) 兼容模式
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/11434'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  # === RAG Controller（FastAPI）===
+  rag-controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./app:/app/app
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://ragkb:ragkb_secret@postgres:5432/ragkb}
+      - QDRANT_HOST=${QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${QDRANT_PORT:-6333}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - RAG_LOG_LEVEL=${RAG_LOG_LEVEL:-info}
+      - RAG_SECRET_KEY=${RAG_SECRET_KEY:-change_me}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  # === 前端（React SPA）===
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - rag-controller
+
+volumes:
+  qdrant_data:
+  postgres_data:
+  redis_data:
+  minio_data:
+  ollama_data:
