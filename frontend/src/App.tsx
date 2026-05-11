@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { api, KB, Document } from "./api";
+import { api, isLoggedIn, logout, KB, Document, UserInfo } from "./api";
 import { AIPanel } from "./AIPanel";
+import { SearchPage } from "./SearchPage";
 import {
   Book,
   Search,
@@ -13,7 +14,6 @@ import {
   Trash2,
   Plus,
   FileText,
-  Table,
   Zap,
   Import,
   UploadCloud,
@@ -23,7 +23,6 @@ import {
   ChevronDown,
   Filter,
   ArrowUpDown,
-  MoreVertical,
   MoreHorizontal,
   Settings,
   Share2,
@@ -32,25 +31,112 @@ import {
   Loader,
   CheckCircle2,
   AlertCircle,
+  LogOut,
+  User,
 } from "lucide-react";
 
-type NavItem = "home" | "documents" | "recent" | "favorites" | "trash";
+type NavItem = "home" | "documents" | "recent" | "favorites" | "trash" | "search";
+
+// ===== Login Page =====
+function LoginPage() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await api.login(username, password);
+      window.location.reload();
+    } catch (err: any) {
+      setError(err.message || "登录失败");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-indigo-50">
+      <div className="w-full max-w-sm mx-auto p-8">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Book className="w-8 h-8 text-indigo-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">AI 知识库</h1>
+          <p className="text-sm text-gray-500 mt-1">请登录以继续</p>
+        </div>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="用户名"
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+              disabled={loading}
+              autoFocus
+            />
+          </div>
+          <div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="密码"
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+              disabled={loading}
+            />
+          </div>
+          {error && (
+            <div className="text-red-500 text-xs font-medium bg-red-50 px-3 py-2 rounded-lg">
+              {error}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={loading || !username || !password}
+            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-200"
+          >
+            {loading ? "登录中..." : "登录"}
+          </button>
+        </form>
+        <p className="text-xs text-gray-400 text-center mt-6">
+          默认管理员: admin / admin123
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function App() {
+  const [user, setUser] = useState<UserInfo | null>(null);
   const [kbs, setKbs] = useState<KB[]>([]);
   const [activeKB, setActiveKB] = useState<string | null>(null);
   const [nav, setNav] = useState<NavItem>("home");
   const [loading, setLoading] = useState(true);
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const [showKbDropdown, setShowKbDropdown] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const kbDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load KBs
+  // Check auth + load KBs
   useEffect(() => {
-    api.listKBs().then((list) => {
+    if (!isLoggedIn()) {
+      setLoading(false);
+      return;
+    }
+    api.getMe().then((u) => {
+      setUser(u);
+      return api.listKBs();
+    }).then((list) => {
       setKbs(list);
       if (list.length > 0) setActiveKB(list[0].id);
+    }).catch(() => {
+      logout();
+    }).finally(() => {
       setLoading(false);
     });
   }, []);
@@ -94,6 +180,10 @@ function App() {
         </div>
       </div>
     );
+  }
+
+  if (!isLoggedIn()) {
+    return <LoginPage />;
   }
 
   return (
@@ -172,6 +262,14 @@ function App() {
             <input
               type="text"
               placeholder="搜索知识库..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setNav("search")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setNav("search");
+                }
+              }}
               className="w-full bg-gray-50 border border-gray-100 rounded-xl py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white transition-all"
             />
           </div>
@@ -181,6 +279,7 @@ function App() {
         <nav className="px-2 space-y-0.5 flex-1 overflow-y-auto custom-scrollbar">
           {[
             { id: "home" as NavItem, icon: Home, label: "首页" },
+            { id: "search" as NavItem, icon: Search, label: "搜索" },
             { id: "documents" as NavItem, icon: Layers, label: "文档" },
             { id: "recent" as NavItem, icon: Clock, label: "最近访问" },
             { id: "favorites" as NavItem, icon: Star, label: "收藏" },
@@ -240,18 +339,23 @@ function App() {
 
         {/* User Area */}
         <div className="p-4 bg-gray-50/50 flex items-center gap-3 border-t border-gray-100">
-          <img
-            src="https://ui-avatars.com/api/?name=User&background=6366F1&color=fff"
-            className="w-8 h-8 rounded-full border-2 border-white shadow-sm"
-            alt="Avatar"
-          />
+          <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 shrink-0 border-2 border-white shadow-sm">
+            <User className="w-4 h-4" />
+          </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-800 truncate">
-              Local User
+              {user?.display_name || user?.username || "User"}
+            </p>
+            <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
+              {user?.role || "viewer"}
             </p>
           </div>
-          <button className="text-gray-400 hover:text-gray-600">
-            <Settings className="w-4 h-4" />
+          <button
+            onClick={logout}
+            className="text-gray-400 hover:text-red-500 p-1 rounded-lg hover:bg-red-50 transition-all"
+            title="登出"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </aside>
@@ -483,6 +587,8 @@ function App() {
               {/* Document List */}
               <ActiveDocumentTable kbId={activeKB} />
             </>
+          ) : nav === "search" ? (
+            <SearchPage kbId={activeKB} initialQuery={searchQuery} />
           ) : nav === "documents" ? (
             /* ===== DOCUMENTS ===== */
             <ActiveDocumentTable kbId={activeKB} />

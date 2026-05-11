@@ -5,18 +5,39 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.db.session import init_db
-from app.routers import documents, search, admin, wiki
+from app.db.session import init_db, async_session
+from app.routers import documents, search, admin, wiki, auth
+from app.routers.auth import hash_password
+from app.db.models import User, Role
 from app.core.ollama_client import ollama_client
+
+
+async def _bootstrap_admin():
+    """启动时自动创建默认 admin 用户（如果不存在）"""
+    async with async_session() as db:
+        result = await db.execute(select(User).where(User.role == Role.ADMIN))
+        if not result.scalar_one_or_none():
+            admin_user = User(
+                username="admin",
+                email="admin@local-rag.local",
+                password_hash=hash_password("admin123"),
+                display_name="Admin",
+                role=Role.ADMIN,
+            )
+            db.add(admin_user)
+            await db.commit()
+            print("✓ 默认管理员已创建 (admin / admin123)")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时：初始化数据库、检查 Ollama
+    # 启动时：初始化数据库、检查 Ollama、创建默认管理员
     await init_db()
+    await _bootstrap_admin()
     ollama_ok = await ollama_client.check_health()
     if ollama_ok:
         print("✓ Ollama 服务连接成功")
@@ -45,6 +66,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")

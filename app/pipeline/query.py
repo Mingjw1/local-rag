@@ -46,18 +46,22 @@ async def search_documents(
         vector=query_embedding,
         limit=top_k * 2,  # 多取一些供重排序
         query_filter=filter_condition,
+        hybrid=hybrid,
+        query_text=query if hybrid else None,
     )
 
-    # 3. 转为 SearchResult
+    # 3. 转为 SearchResult（含引用元数据）
     results = []
     for point in raw_results:
         payload = point.payload or {}
         results.append(SearchResult(
             chunk_id=payload.get("chunk_id", point.id),
+            chunk_index=payload.get("index", 0),
             document_id=payload.get("document_id", ""),
             document_title=payload.get("document_title", "Unknown"),
             content=payload.get("content", ""),
             score=point.score or 0.0,
+            updated_at=payload.get("updated_at", None),
             metadata={"index": payload.get("index", 0)},
         ))
 

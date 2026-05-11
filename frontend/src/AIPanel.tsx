@@ -36,7 +36,6 @@ export function AIPanel({ kbId }: AIPanelProps) {
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
   const [hasAnswered, setHasAnswered] = useState(false);
   const abortRef = useRef<{ abort: () => void } | null>(null);
-  const pendingBuf = useRef("");
   const answerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const startRef = useRef(0);
@@ -70,7 +69,6 @@ export function AIPanel({ kbId }: AIPanelProps) {
     setSources([]);
     setHasAnswered(false);
     setElapsed(0);
-    pendingBuf.current = "";
     startRef.current = performance.now();
     setThinkingSteps(["🔍 语义搜索中..."]);
 
@@ -80,26 +78,14 @@ export function AIPanel({ kbId }: AIPanelProps) {
           setThinking(false);
           setThinkingSteps((prev) => [...prev, "📝 生成回答中..."]);
         }
-        pendingBuf.current += text;
-        if (
-          pendingBuf.current.length >= 30 ||
-          pendingBuf.current.includes("\n")
-        ) {
-          setAnswer((prev) => prev + pendingBuf.current);
-          pendingBuf.current = "";
-          setHasAnswered(true);
-        }
+        setAnswer((prev) => prev + text);
+        setHasAnswered(true);
       },
       onSources: (sources) => {
         setSources(sources);
         setThinkingSteps((prev) => [...prev, `📎 引用 ${sources.length} 个来源`]);
       },
       onDone: () => {
-        if (pendingBuf.current) {
-          setAnswer((prev) => prev + pendingBuf.current);
-          pendingBuf.current = "";
-          setHasAnswered(true);
-        }
         setElapsed(performance.now() - startRef.current);
         setLoading(false);
         setThinking(false);
@@ -334,21 +320,41 @@ export function AIPanel({ kbId }: AIPanelProps) {
             {/* Citations */}
             {sources.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                  引用来源 ({sources.length})
+                <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                  <span>引用来源</span>
+                  <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[10px]">
+                    {sources.length}
+                  </span>
                 </h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {sources.slice(0, 4).map((s, i) => (
+                <div className="space-y-1.5">
+                  {sources.slice(0, 6).map((s: any, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 p-2 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 cursor-pointer transition-colors shadow-sm"
+                      className="flex items-start gap-2.5 p-2.5 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 transition-colors shadow-sm cursor-default"
                     >
-                      <div className="w-6 h-6 bg-purple-50 text-purple-600 rounded flex items-center justify-center shrink-0">
-                        <span className="text-[10px] font-bold">#{i + 1}</span>
+                      <div className="w-5 h-5 bg-indigo-50 text-indigo-500 rounded flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="text-[9px] font-bold">#{i + 1}</span>
                       </div>
-                      <span className="text-xs text-gray-700 truncate font-medium">
-                        {s.document_title}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-gray-800 truncate">
+                          {s.document_title}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {s.chunk_index != null && (
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              chunk #{s.chunk_index}
+                            </span>
+                          )}
+                          {s.updated_at && (
+                            <span className="text-[10px] text-gray-400">
+                              更新于 {new Date(s.updated_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-1 leading-relaxed line-clamp-2">
+                          {s.content}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>

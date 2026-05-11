@@ -73,6 +73,7 @@ async def process_document(doc_id: str, db: AsyncSession):
                     "kb_id": doc.kb_id,
                     "index": i,
                     "content": text[:500],  # payload 中存摘要
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                 },
             })
 

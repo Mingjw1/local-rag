@@ -41,10 +41,12 @@ class SearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     chunk_id: str
+    chunk_index: int = 0
     document_id: str
     document_title: str
     content: str
     score: float
+    updated_at: Optional[str] = None
     metadata: dict = {}
 
 

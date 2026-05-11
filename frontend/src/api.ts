@@ -1,6 +1,73 @@
-/** API 客户端 */
+/** API 客户端 — 带 JWT 认证支持 */
 
 const BASE = "/api/v1";
+const TOKEN_KEY = "ragkb_token";
+const USER_KEY = "ragkb_user";
+
+// ===== Token Management =====
+
+function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function setToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function isLoggedIn(): boolean {
+  return !!getToken();
+}
+
+export function logout() {
+  clearToken();
+  window.location.reload();
+}
+
+// ===== HTTP Helpers =====
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...authHeaders(),
+    ...(options?.headers as Record<string, string> || {}),
+  };
+  const resp = await fetch(`${BASE}${url}`, { ...options, headers });
+  if (resp.status === 401) {
+    clearToken();
+    throw new Error("Unauthorized");
+  }
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`HTTP ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
+export interface UserInfo {
+  id: string;
+  username: string;
+  email: string | null;
+  display_name: string;
+  role: string;
+  department_id: string | null;
+  is_active: boolean;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: UserInfo;
+}
 
 export interface KB {
   id: string;
@@ -23,10 +90,13 @@ export interface Document {
 
 export interface SearchResult {
   chunk_id: string;
+  chunk_index: number;
   document_id: string;
   document_title: string;
   content: string;
   score: number;
+  updated_at?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface SearchResponse {
@@ -50,20 +120,35 @@ export interface WikiPage {
   modified: string;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+async function requestWithFile<T>(url: string, form: FormData): Promise<T> {
+  const headers = { ...authHeaders() };
   const resp = await fetch(`${BASE}${url}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
+    method: "POST",
+    headers,
+    body: form,
   });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`HTTP ${resp.status}: ${text}`);
+  if (resp.status === 401) {
+    clearToken();
+    throw new Error("Unauthorized");
   }
-  return resp.json();
+  if (!resp.ok) throw new Error(`Upload failed: ${await resp.text()}`);
+  return resp.json() as Promise<T>;
 }
 
 export const api = {
-  // 知识库
+  // ===== 认证 =====
+  login: async (username: string, password: string): Promise<LoginResponse> => {
+    const resp = await request<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    setToken(resp.access_token);
+    localStorage.setItem(USER_KEY, JSON.stringify(resp.user));
+    return resp;
+  },
+  getMe: () => request<UserInfo>("/auth/me"),
+
+  // ===== 知识库 =====
   listKBs: () => request<KB[]>("/knowledge-bases"),
   getKB: (id: string) => request<KB>(`/knowledge-bases/${id}`),
   createKB: (name: string, description: string) =>
@@ -74,19 +159,14 @@ export const api = {
   deleteKB: (id: string) =>
     request<{ status: string }>(`/knowledge-bases/${id}`, { method: "DELETE" }),
 
-  // 文档
+  // ===== 文档 =====
   listDocuments: (kbId: string) =>
     request<Document[]>(`/knowledge-bases/${kbId}/documents`),
-  uploadDocument: async (kbId: string, file: File, title?: string) => {
+  uploadDocument: (kbId: string, file: File, title?: string) => {
     const form = new FormData();
     form.append("file", file);
     if (title) form.append("title", title);
-    const resp = await fetch(`${BASE}/knowledge-bases/${kbId}/documents`, {
-      method: "POST",
-      body: form,
-    });
-    if (!resp.ok) throw new Error(`Upload failed: ${await resp.text()}`);
-    return resp.json() as Promise<Document>;
+    return requestWithFile<Document>(`/knowledge-bases/${kbId}/documents`, form);
   },
   deleteDocument: (kbId: string, docId: string) =>
     request<{ status: string }>(`/knowledge-bases/${kbId}/documents/${docId}`, {

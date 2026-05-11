@@ -16,9 +16,48 @@ from app.core.ollama_client import ollama_client
 from app.core.config import settings
 
 
+def _has_cjk(text: str) -> bool:
+    """Check if text contains any CJK (Chinese/Japanese/Korean) characters."""
+    return bool(re.search(r'[一-鿿]', text))
+
+
 def normalize_text(text: str) -> str:
-    """Clean tokenizer artifacts from streaming output."""
+    """Clean tokenizer artifacts from streaming output.
+
+    Handles:
+    - Token-split word fragments ("R AG" → "RAG", "Ret rie val" → "Retrieval")
+    - Missing spacing between Latin and CJK ("你好World" → "你好 World")
+    - Chinese punctuation spacing
+    - Redundant whitespace
+    """
+    if not text:
+        return ""
+
+    # 1. Normalize all whitespace to single space
     text = re.sub(r'\s+', ' ', text)
+
+    # 2. In CJK context: remove spaces between Latin letters.
+    #    Tokenizers commonly split technical terms ("R AG", "Ret rie val")
+    #    and the space between Latin letters in Chinese text is always an artifact.
+    if _has_cjk(text):
+        text = re.sub(r'(?<=[a-zA-Z])\s+(?=[a-zA-Z])', '', text)
+
+    # 3. Fix CJK boundary spacing: remove space between CJK and Latin
+    text = re.sub(r'([一-鿿])\s+([a-zA-Z])', r'\1\2', text)
+    text = re.sub(r'([a-zA-Z])\s+([一-鿿])', r'\1\2', text)
+
+    # 4. Fix CJK-CJK spacing (token-split artifact)
+    text = re.sub(r'([一-鿿])\s+([一-鿿])', r'\1\2', text)
+
+    # 5. Insert space between Latin and CJK where missing
+    #    "你好World" → "你好 World"
+    text = re.sub(r'([一-鿿])([A-Za-z])', r'\1 \2', text)
+    text = re.sub(r'([A-Za-z])([一-鿿])', r'\1 \2', text)
+
+    # 6. Normalize whitespace again after insertions
+    text = re.sub(r'\s+', ' ', text)
+
+    # 7. Fix Chinese punctuation spacing
     for k, v in {
         ' 。': '。', ' ，': '，', ' ：': '：',
         ' ！': '！', ' ？': '？', ' ；': '；',
@@ -27,6 +66,7 @@ def normalize_text(text: str) -> str:
         ' !': '!', ' ?': '?',
     }.items():
         text = text.replace(k, v)
+
     return text.strip()
 
 router = APIRouter(tags=["search"])
@@ -121,7 +161,16 @@ async def query_stream(
     async def event_generator():
         # 先发送来源
         sources_data = [
-            {"index": i, "title": s.document_title, "content": s.content[:200], "score": s.score}
+            {
+                "index": i,
+                "chunk_index": s.chunk_index,
+                "title": s.document_title,
+                "document_id": s.document_id,
+                "chunk_id": s.chunk_id,
+                "content": s.content[:200],
+                "score": s.score,
+                "updated_at": s.updated_at,
+            }
             for i, s in enumerate(sources)
         ]
         yield {"event": "sources", "data": json.dumps(sources_data, ensure_ascii=False)}
@@ -168,17 +217,31 @@ async def query_stream(
             temperature=temp,
         )
 
-        # 后端流式聚合：缓冲 token，达到条件后 normalize 再推送
+        # 后端流式聚合：缓冲 token，句子级推送
         buf = ""
+        SENTENCE_END = re.compile(r'[。！？.!?\n]')
+        MIN_FLUSH = 50         # 最小推送字符数
+        MAX_FLUSH = 120        # 强制推送阈值，避免前端等太久
+
         async for chunk in chat_gen:
             if not chunk:
                 continue
             buf += chunk
 
-            # 推送条件：达到最小字符数 OR 到达句子结束符
-            if len(buf) >= 30 or any(buf.endswith(c) for c in ("。", ".", "！", "？", "!", "?", "\n")):
+            # 强制推送：buffer 超过最大阈值
+            if len(buf) >= MAX_FLUSH:
                 yield {"event": "token", "data": normalize_text(buf)}
                 buf = ""
+            # 正常推送：达到最小字符数，且在句子边界
+            elif len(buf) >= MIN_FLUSH and SENTENCE_END.search(buf):
+                # 找到最后一个句子结束符，按此分割
+                match_iter = list(SENTENCE_END.finditer(buf))
+                if match_iter:
+                    last_end = match_iter[-1]
+                    split_at = last_end.end()
+                    flush_part = buf[:split_at]
+                    buf = buf[split_at:]
+                    yield {"event": "token", "data": normalize_text(flush_part)}
 
         if buf:
             yield {"event": "token", "data": normalize_text(buf)}

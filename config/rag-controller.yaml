@@ -24,6 +24,7 @@ cache:
   provider: redis
   host: ${REDIS_HOST:-redis}
   port: ${REDIS_PORT:-6379}
+  password: ${REDIS_PASSWORD:-}
   embedding_ttl: 86400
   query_ttl: 300
 

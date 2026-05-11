@@ -1,10 +1,11 @@
 # 检索策略配置
+# 支持环境变量覆盖: ${VAR:-default}
 chunking:
-  default_strategy: recursive
+  default_strategy: ${CHUNK_STRATEGY:-recursive}
   strategies:
     recursive:
-      chunk_size: 512
-      chunk_overlap: 64
+      chunk_size: ${CHUNK_SIZE:-512}
+      chunk_overlap: ${CHUNK_OVERLAP:-64}
       separators: ["\n\n", "\n", "。", ".", " ", ""]
     semantic:
       min_chunk_size: 128
@@ -22,15 +23,15 @@ embedding:
     ttl: 86400
 
 search:
-  top_k: 20
-  score_threshold: 0.0
-  rerank_top_k: 5
+  top_k: ${TOP_K:-20}
+  score_threshold: ${SEARCH_SCORE_THRESHOLD:-0.0}
+  rerank_top_k: ${RERANK_TOP_K:-5}
   hybrid_search:
-    enabled: true
-    dense_weight: 0.7
-    sparse_weight: 0.3
+    enabled: ${HYBRID_SEARCH_ENABLED:-true}
+    dense_weight: ${HYBRID_DENSE_WEIGHT:-0.7}
+    sparse_weight: ${HYBRID_SPARSE_WEIGHT:-0.3}
 
 generation:
   stream: true
   citation_format: "【来源:{index}】"
-  max_context_tokens: 8000
+  max_context_tokens: ${LLM_CONTEXT_WINDOW:-8000}
